@@ -22,3 +22,12 @@ Route::name('save')
 
 Route::name('queue')
     ->get('/{locationUuid}', [LocationController::class, 'queue']);
+
+Route::name('shopperSave')
+    ->post('/shopperSave', [LocationController::class, 'shopperSave']);
+
+Route::name('checkout')
+    ->post('/checkout', [LocationController::class, 'checkout']);
+
+Route::name('updateLimit')
+    ->post('/updateLimit', [LocationController::class, 'updateLimit']);

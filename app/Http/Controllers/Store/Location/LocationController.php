@@ -3,11 +3,17 @@
 namespace App\Http\Controllers\Store\Location;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
 use App\Http\Requests\Store\Location\LocationCreateRequest;
 use App\Http\Requests\Store\Location\LocationQueueRequest;
 use App\Http\Requests\Store\Location\LocationStoreRequest;
+use App\Http\Requests\Store\Location\ShopperStoreRequest;
+use App\Http\Requests\Store\Location\CheckoutRequest;
 use App\Models\Store\Location\Location;
 use App\Services\Store\Location\LocationService;
+use App\Services\Shopper\ShopperService;
+use App\Services\Shopper\StatusService;
+use Carbon\Carbon;
 
 /**
  * Class LocationController
@@ -21,12 +27,26 @@ class LocationController extends Controller
     protected $location;
 
     /**
+     * @var ShopperService
+     */
+    protected $shopper;
+
+    /**
+     * @var StatusService
+     */
+    protected $status;
+
+    /**
      * LocationController constructor.
      * @param LocationService $location
+     * @param ShopperService $shopper
+     * @param StatusService $status
      */
-    public function __construct(LocationService $location)
+    public function __construct(LocationService $location, ShopperService $shopper, StatusService $status)
     {
         $this->location = $location;
+        $this->shopper = $shopper;
+        $this->status = $status;
     }
 
     /**
@@ -92,6 +112,136 @@ class LocationController extends Controller
 
         return view('stores.location.queue')
             ->with('location', $location)
+            ->with('store', $storeUuid)
             ->with('shoppers', $shoppers);
+    }
+
+    /**
+     * @param ShopperStoreRequest $request
+     * @param string $storeUuid
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function shopperSave(ShopperStoreRequest $request, string $storeUuid): \Illuminate\Http\RedirectResponse
+    {
+        $params = [
+            'first_name' => $request->first_name,
+            'last_name' => $request->last_name,
+            'email' => $request->email,
+            'location_id' => $request->location_id,
+            'check_in' => Carbon::now()
+        ];
+
+        $location = $this->location->show(
+            [
+                'uuid' => $request->locationUuid
+            ]
+        );
+
+        $active_status = $this->status->show(
+            [
+                'name' => 'Active'
+            ]
+        );
+
+        $pending_status = $this->status->show(
+            [
+                'name' => 'Pending'
+            ]
+        );
+
+        $shopper_count = $this->shopper->count(
+            [
+                'location_id' => $request->location_id,
+                'status_id' => $active_status['id']
+            ]
+        );
+
+        if ($location['shopper_limit'] > $shopper_count) {
+            $params['status_id'] = $active_status['id'];
+        } else {
+            $params['status_id'] = $pending_status['id'];
+        }
+
+        $this->shopper->create($params);
+
+        return redirect()->route('store.location.queue', ['storeUuid' => $storeUuid, 'locationUuid' => $request->locationUuid]);
+    }
+
+    /**
+     * @param CheckoutRequest $request
+     * @param string $storeUuid
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function checkout(CheckoutRequest $request, string $storeUuid): \Illuminate\Http\RedirectResponse
+    {
+        $completed_status = $this->status->show(
+            [
+                'name' => 'Completed'
+            ]
+        );
+
+        $active_status = $this->status->show(
+            [
+                'name' => 'Active'
+            ]
+        );
+
+        $pending_status = $this->status->show(
+            [
+                'name' => 'Pending'
+            ]
+        );
+
+        $params = [
+            'status_id' => $completed_status['id'],
+            'check_out' => Carbon::now()
+        ];
+
+        $this->shopper->update($request->shopper_id, $params);
+
+        $location = $this->location->show(
+            [
+                'uuid' => $request->locationUuid
+            ]
+        );
+
+        $shopper_count = $this->shopper->count(
+            [
+                'location_id' => $request->location_id,
+                'status_id' => $active_status['id']
+            ]
+        );
+
+        if ($location['shopper_limit'] > $shopper_count) {
+            $next_shopper = $this->shopper->show(
+                [
+                    'location_id' => $request->location_id,
+                    'status_id' => $pending_status['id']
+                ],
+                [
+
+                ],
+                [
+                    'check_in' => 'ASC'
+                ]
+            );
+
+            $this->shopper->update($next_shopper['id'], ['status_id' => $active_status['id']]);
+        } 
+
+        return redirect()->route('store.location.queue', ['storeUuid' => $storeUuid, 'locationUuid' => $request->locationUuid]);
+        
+    }
+
+    /**
+     * @param Request $request
+     * @param string $storeUuid
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function updateLimit(Request $request, string $storeUuid): \Illuminate\Http\JsonResponse
+    {
+        $this->location->update((int)$request->location_id, ['shopper_limit' => $request->limit]);
+        return response()->json(['status' => 'success']);
+
     }
 }
